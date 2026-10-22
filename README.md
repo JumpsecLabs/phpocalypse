@@ -79,10 +79,10 @@ phpocalypse-<hostname>-<timestamp>.zip
 
 The main files to look at are:
  
-- `findings/findings.txt` â€” the result and a readable summary of the checks.
-- `findings/findings.json` â€” the same findings in a format that can be processed automatically.
-- `findings/artifacts/` â€” copies of suspicious files, where any were found, together with hashes and original modification times.
-- `manifest.json` â€” what was collected and what couldn't be accessed.
+- `findings/findings.txt` - the result and a readable summary of the checks.
+- `findings/findings.json` - the same findings in a format that can be processed automatically.
+- `findings/artifacts/` - copies of suspicious files, where any were found, together with hashes and original modification times.
+- `manifest.json` - what was collected and what couldn't be accessed.
 
 ## Understanding the result
 
