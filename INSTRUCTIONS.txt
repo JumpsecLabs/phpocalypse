@@ -1,0 +1,113 @@
+JUMPSEC PHP TRIAGE COLLECTOR  
+CVE-2026-109618 / CVE-2026-109619
+
+
+WHAT THIS IS
+------------
+A single, read-only script that collects the information JUMPSEC needs to tell
+you whether this server shows signs of the PHP vulnerability currently being
+exploited. It gathers the relevant logs, checks the PHP configuration, and
+looks for known indicators of compromise. It then packages everything into one
+.zip file that you upload to us.
+
+IT IS SAFE TO RUN ON A LIVE / PRODUCTION SERVER.
+  - It only READS. It never changes any setting and never fixes anything.
+  - It makes NO connection to the internet or to JUMPSEC. Nothing leaves your
+    server until YOU upload the .zip.
+  - It writes nothing except its own .zip output file.
+
+
+WHAT YOU NEED
+-------------
+  - SSH / terminal access to the affected Linux server.
+  - Permission to run a command as root (sudo). This is strongly recommended
+    so the script can read all of the logs. It will still run without root,
+    but the results will be marked as incomplete.
+  - The file "phpocalypse-triage.sh" (provided by JUMPSEC).
+
+
+HOW TO RUN IT  (3 steps)
+------------------------
+1. Copy "phpocalypse-triage.sh" onto the server (for example into /tmp or your
+   home directory).
+
+2. Run it as root:
+
+       sudo sh phpocalypse-triage.sh
+
+   (If you cannot use sudo, run:  sh phpocalypse-triage.sh  -- but tell us, as
+   the collection will be partial.)
+
+   It takes anywhere from a few seconds to a couple of minutes depending on how
+   large your log files are. You will see progress messages. When it finishes
+   it prints something like:
+
+       ===============================================================
+        phpocalypse triage complete
+       ===============================================================
+        VERDICT : ...
+        BUNDLE  : /root/phpocalypse-webserver01-20261021T154400Z.zip
+        SHA-256 : 02893381b245bc68d28fa0e2b957f3f24212f2a11b0b33e1459b002b6835b5a6
+       ===============================================================
+
+3. Upload that .zip file (the "BUNDLE" path shown above) to the JUMPSEC portal.
+   That is all we need from you. Please do not open, edit, or delete the .zip --
+   send it to us as-is.
+
+
+RUNNING ON MORE THAN ONE SERVER
+-------------------------------
+Run the script once on EACH PHP server you want checked. Each run produces its
+own .zip named after that server's hostname. Upload all of them.
+
+
+IF YOUR PHP RUNS INSIDE DOCKER / A CONTAINER
+--------------------------------------------
+Run the script INSIDE the container as above. The bundle will include a short
+notice file explaining that some logs may live on the Docker HOST instead. If
+you see that notice, also run this on the host and send us the result:
+
+       docker logs <your-container-name>  >  <your-container-name>.log  2>&1
+
+Then upload that .log file alongside the .zip.
+
+
+WHERE THE OUTPUT GOES
+---------------------
+By default the .zip is written to the directory you ran the command from. To
+choose a different location:
+
+       sudo sh phpocalypse-triage.sh -o /path/to/output/folder
+
+
+IMPORTANT: PRESERVE EVIDENCE
+---------------------------
+Until JUMPSEC has reviewed your results, please DO NOT:
+  - delete or rotate log files,
+  - clear /tmp or session directories,
+  - rebuild or reimage the server.
+
+If the script reports "VERDICT: INDICATORS FOUND", treat the server as a
+suspected compromise and contact your JUMPSEC point of contact immediately.
+
+
+WHAT IS IN THE .ZIP  (for your reference)
+-----------------------------------------
+  manifest.json   - inventory of everything collected, with SHA-256 hashes and
+                    a note of anything that could not be read.
+  web/            - Apache / Nginx access and error logs.
+  php/            - PHP configuration summary, ini / FPM pool files, app logs.
+  system/         - syslog, journal, kernel, authentication and audit logs.
+  security/       - firewall / WAF / SELinux telemetry where available.
+  findings/       - the automated check results, a plain-text summary, and
+                    read-only copies of any suspicious files that were found.
+
+No passwords or secrets are deliberately collected. The bundle does contain
+your server logs, which may include IP addresses and request data; it is
+handled under our engagement confidentiality terms.
+
+
+QUESTIONS
+---------
+Contact your JUMPSEC point of contact.
+===============================================================================
