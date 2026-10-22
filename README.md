@@ -1,15 +1,11 @@
 # phpocalypse
 Read-only triage script for the PHP2Shell vulnerabilities (CVE-2026-109618, CVE-2026-109619).
 
-Point it at a Linux web server and it gathers the logs and session data needed to
-judge whether the host was targeted, checks the PHP settings that make the bug
-exploitable, flags and quarantines any suspicious session files, and drops
-everything into a single `.zip`. It does not change anything on the host and does
-not phone home the only thing it writes is the output archive.
+Run it on a Linux web server to check for signs of exploitation and collect the files needed for a closer look. It checks relevant PHP settings, examines session files and logs, and copies any suspicious files into the results. Everything is packaged into a single ZIP archive.
 
-If you just need to hand a server over to someone for review, run it and send the
-zip. If you're triaging yourself, the `findings/` directory gives you a verdict and
-the matched artefacts up front.
+The script does not change the original files or settings, and it does not send anything over the network. You decide where the ZIP goes.
+
+If you're handing the results to someone else, send them the archive. If you're reviewing them yourself, start with `findings/findings.txt`.
 
 ## Background
 
@@ -23,11 +19,10 @@ chains come out of that:
 - **Chain C** a `session.serialize_handler` mismatch between two directories that
  share a save path lets a serialized object be smuggled in after a `|`, triggering
  object injection / a POP gadget on decode.
-- Chain B (an `unserialize`/`var_destroy` memory-safety bug) is a separate,
- harder-to-weaponise path and is not what this tool keys on.
 
-The reliable, in-the-wild paths are A and C, and both leave traces on disk and in
-logs. phpocalypse looks for those.
+**Chain B** involves a separate `unserialize` / `var_destroy` memory-safety issue. phpocalypse does not check for that chain.
+
+Chains A and C can leave evidence in session files and logs. The script looks for that evidence, although it may not always be present by the time the check is run.
 
 ## Requirements
 
@@ -59,13 +54,11 @@ It finishes with a result block:
  SHA-256 : 0289...b5a6
 ```
 
-Run it once per host. Each run produces its own zip named after the hostname.
+Run the script once on each host you want to assess. Each run produces a separate ZIP named after the host.
 
 ### Containers
 
-Run it inside the container. PHP/web logs are often written to the container's
-stdout and captured by the runtime on the host instead of inside the filesystem 
-if so, the bundle includes a notice, and you should also grab:
+Some containers write PHP and web server logs to standard output rather than to files inside the container. Those logs may only be available from the container runtime. If the script identifies this as a gap, collect the container logs separately, for example:
 
 ```sh
 docker logs <container-name> > <container-name>.stdout.log 2>&1
@@ -84,11 +77,16 @@ phpocalypse-<hostname>-<timestamp>.zip
  findings/    verdict, machine-readable results, quarantined artefacts
 ```
 
-`findings/findings.txt` leads with the verdict. `findings/findings.json` is the
-same result in a parseable form. Anything the scan flagged is copied, read-only,
-into `findings/artifacts/` with its hash and original mtime.
+The main files to look at are:
+ 
+- `findings/findings.txt` â€” the result and a readable summary of the checks.
+- `findings/findings.json` â€” the same findings in a format that can be processed automatically.
+- `findings/artifacts/` â€” copies of suspicious files, where any were found, together with hashes and original modification times.
+- `manifest.json` â€” what was collected and what couldn't be accessed.
 
-## Reading the verdict
+## Understanding the result
+
+The script reports one of three outcomes:
 
 - **INDICATORS FOUND** a poisoned session file or a known log signature was seen.
  Treat the host as a suspected compromise, preserve it, and escalate.
@@ -97,35 +95,29 @@ into `findings/artifacts/` with its hash and original mtime.
 - **INCOMPLETE** the run couldn't read everything (usually: not run as root).
  `manifest.json` lists the gaps. Re-run with `sudo` for a complete picture.
 
-The config check is separate from the verdict: a host with no indicators can still
-come back with recommendations (e.g. `upload_progress` still on) that are worth
-acting on regardless.
+PHP configuration checks are reported separately. For example, the script may flag `session.upload_progress` as enabled even when it finds no indicators of compromise. A configuration finding is not, on its own, evidence of exploitation.
 
 ## Getting results reviewed
 
-This tool collects; it doesn't adjudicate edge cases. JUMPSEC runs review and
-incident response for this event. Anyone else can read `findings/` directly or pass the bundle to their own
-responder.
+phpocalypse is intended for initial triage. Its findings need to be considered alongside other evidence, and it is not a substitute for a full incident investigation.
 
-See [`INSTRUCTIONS.txt`](INSTRUCTIONS.txt) for a short, non-technical runbook you
-can forward to a server owner.
+If you're a JUMPSEC client, upload the ZIP through the JSEC portal for review. Otherwise, you can review the `findings/` directory yourself or share the archive with your incident response team.
+
+For instructions you can pass directly to a server owner, see [`INSTRUCTIONS.txt`](INSTRUCTIONS.txt).
 
 ## Safety
 
-- Read-only. It never edits a setting, rotates a log, or deletes anything.
-- No network activity. Nothing leaves the host until you send the zip.
-- Suspicious files are copied, never moved or modified; originals stay in place.
+- The script does not modify PHP settings, rotate logs or remove files.
+- It does not make network connections or upload results.
+- Suspicious files are copied into the archive, not moved or deleted. The originals remain on the host.
 
-Collected logs can contain IP addresses and request data. Handle the bundle
-accordingly.
+The ZIP may contain sensitive information, including request data, session contents and IP addresses. Store and share it securely.
 
 ## Limitations
 
-- It detects the on-disk and log evidence of Chains A and C. It does not detect
- in-memory-only exploitation, and absence of indicators is not proof of safety.
-- Session-file detection depends on the evidence still being present Chain C is
- partly self-cleaning, so a clean scan with a matching error-log signature still
- warrants review.
+- The script looks for evidence associated with **Chains A and C** in files and logs. It will not identify every possible exploitation method, including activity that leaves only in-memory evidence.
+- Detection depends on the evidence still being available. In particular, **Chain C** may remove some of its own traces. A session-file scan with no matches does not negate a suspicious error-log entry.
+- Missing logs, rotated data and restricted permissions can all limit what the script can assess. Check `manifest.json` before drawing conclusions from a negative result.
 
 ## License
 
