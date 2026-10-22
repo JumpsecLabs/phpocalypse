@@ -1,9 +1,9 @@
 # phpocalypse
 Read-only triage script for the PHP2Shell vulnerabilities (CVE-2026-109618, CVE-2026-109619).
 
-Run it on a Linux web server to check for signs of exploitation and collect the files needed for a closer look. It checks relevant PHP settings, examines session files and logs, and copies any suspicious files into the results. Everything is packaged into a single ZIP archive.
+Run it on a Linux web server to check for signs of exploitation and collect the files needed for a closer look or PHP exposure assessment. It checks relevant PHP settings, examines session files and logs, and copies any suspicious files into the results. Everything is packaged into a single ZIP archive.
 
-The script does not change the original files or settings, and it does not send anything over the network. You decide where the ZIP goes.
+The script does not change the original files or settings, and it does not send anything over the network. You decide where the ZIP goes. It is free and open-source and always will be.
 
 If you're handing the results to someone else, send them the archive. If you're reviewing them yourself, start with `findings/findings.txt`.
 
@@ -121,4 +121,4 @@ The ZIP may contain sensitive information, including request data, session conte
 
 ## License
 
-[Apache-2.0](LICENSE). Copyright JUMPSEC Ltd.
+[Apache-2.0](LICENSE). Copyright JUMPSEC Ltd. / JUMPSEC Labs
