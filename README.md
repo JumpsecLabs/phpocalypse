@@ -104,8 +104,7 @@ acting on regardless.
 ## Getting results reviewed
 
 This tool collects; it doesn't adjudicate edge cases. JUMPSEC runs review and
-incident response for this event JUMPSEC clients upload the zip through the JSEC
-portal. Anyone else can read `findings/` directly or pass the bundle to their own
+incident response for this event. Anyone else can read `findings/` directly or pass the bundle to their own
 responder.
 
 See [`INSTRUCTIONS.txt`](INSTRUCTIONS.txt) for a short, non-technical runbook you
