@@ -37,7 +37,8 @@ EOF
 
 while [ $# -gt 0 ]; do
     case "$1" in
-        -o) OUT_DIR="$2"; shift 2 ;;
+        -o) [ $# -ge 2 ] || { echo "phpocalypse: -o requires an argument" >&2; exit 2; }
+            OUT_DIR="$2"; shift 2 ;;
         -q) QUIET=1; shift ;;
         -h|--help) usage; exit 0 ;;
         *) echo "phpocalypse: unknown option: $1" >&2; exit 2 ;;
@@ -129,7 +130,7 @@ file_size() {
 # escape a string for embedding in JSON (no surrounding quotes)
 jstr() {
     printf '%s' "$1" \
-      | tr -d '\000\r' \
+      | tr -d '\000-\010\013-\037' \
       | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' \
       | awk 'BEGIN{ORS=""}{gsub(/\t/,"\\t"); if(NR>1) printf "\\n"; printf "%s",$0}'
 }
@@ -227,14 +228,9 @@ PHP_SUMMARY="$ROOT/php/php-config-summary.txt"
 
 PHP_BINS=""
 for c in php php8 php8.5 php8.4 php8.3 php8.2 php8.1 php8.0 php7.4 php7.3 php7.2 \
-         /usr/bin/php /usr/local/bin/php /opt/php/bin/php /usr/sbin/php-fpm; do
+         /usr/bin/php /usr/local/bin/php /opt/php/bin/php; do
     p="$(command -v "$c" 2>/dev/null)"
     [ -n "$p" ] || { [ -x "$c" ] && p="$c"; }
-    [ -n "$p" ] || continue
-    case " $PHP_BINS " in *" $p "*) ;; *) PHP_BINS="$PHP_BINS $p" ;; esac
-done
-for c in php-fpm php-fpm8.5 php-fpm8.4 php-fpm8.3 php-fpm8.2 php-fpm8.1 php-fpm8.0; do
-    p="$(command -v "$c" 2>/dev/null)" || continue
     [ -n "$p" ] || continue
     case " $PHP_BINS " in *" $p "*) ;; *) PHP_BINS="$PHP_BINS $p" ;; esac
 done
@@ -243,7 +239,7 @@ SESSION_SAVE_PATHS=""
 add_savepath() {
     _sp="$(printf '%s' "$1" | sed 's/.*;//')"   # strip the optional "N;" depth prefix
     [ -n "$_sp" ] || return
-    case " $SESSION_SAVE_PATHS " in *" $_sp "*) ;; *) SESSION_SAVE_PATHS="$SESSION_SAVE_PATHS $_sp" ;; esac
+    case " $SESSION_SAVE_PATHS " in *" $_sp "*) ;; *) SESSION_SAVE_PATHS="${SESSION_SAVE_PATHS:+$SESSION_SAVE_PATHS }$_sp" ;; esac
 }
 
 if [ -z "$PHP_BINS" ]; then
@@ -252,7 +248,6 @@ if [ -z "$PHP_BINS" ]; then
     logc "php: no binary discovered"
 fi
 
-CONF_RISK=0
 for php in $PHP_BINS; do
     ver="$("$php" -v 2>/dev/null | head -n1)"
     tag="$(printf '%s' "$php" | sed 's#/#_#g; s/^_//')"
@@ -260,11 +255,17 @@ for php in $PHP_BINS; do
         echo "----- $php"
         echo "version: ${ver:-unknown}"
     } >> "$PHP_SUMMARY"
-    "$php" -i > "$ROOT/php/phpinfo-${tag}.txt" 2>/dev/null
+    ii="$ROOT/php/phpinfo-${tag}.txt"
+    "$php" -i > "$ii" 2>/dev/null
+    if ! [ -s "$ii" ] || ! grep -q '=>' "$ii" 2>/dev/null; then
+        rm -f "$ii"
+        echo "  (no readable configuration dump from $php)" >> "$PHP_SUMMARY"
+        echo >> "$PHP_SUMMARY"
+        continue
+    fi
     manifest_add "php/phpinfo-${tag}.txt" "collected" "$php -i"
 
     # read the directives straight out of the -i dump; nothing is executed
-    ii="$ROOT/php/phpinfo-${tag}.txt"
     getd() { grep -E "^$1 " "$ii" 2>/dev/null | head -n1 | awk -F'=>' '{print $2}' | sed 's/^ *//; s/ *$//'; }
     up="$(getd 'session.upload_progress.enabled')"
     uc="$(getd 'session.use_only_cookies')"
@@ -284,15 +285,15 @@ for php in $PHP_BINS; do
     [ -n "$sp" ] && add_savepath "$sp"
 
     case "$up" in
-        On|on|1|On*) CONF_RISK=1
+        On|on|1)
             add_rec "[$php] session.upload_progress.enabled is ON -- set it to Off in php.ini. This is the primary vector for all validated chains (CVE-2026-109618/109619)." ;;
     esac
     case "$uc" in
-        Off|off|0|Off*|"") CONF_RISK=1
+        Off|off|0)
             add_rec "[$php] session.use_only_cookies is not On -- set session.use_only_cookies = On to stop attacker-controlled session IDs via the request body." ;;
     esac
     case "$sm" in
-        Off|off|0|Off*|"") CONF_RISK=1
+        Off|off|0)
             add_rec "[$php] session.use_strict_mode is not On -- set session.use_strict_mode = On to prevent session fixation." ;;
     esac
 done
@@ -311,7 +312,7 @@ SH_VALUES=""
 scan_sh() {
     for f in "$@"; do
         [ -f "$f" ] && [ -r "$f" ] || continue
-        v="$(grep -aiE 'serialize_handler' "$f" 2>/dev/null | grep -aiv '^\s*;' | head -n1)"
+        v="$(grep -aiE 'serialize_handler' "$f" 2>/dev/null | grep -aiv '^[[:space:]]*;' | head -n1)"
         [ -n "$v" ] && SH_VALUES="$SH_VALUES
 $f: $v"
     done
@@ -339,7 +340,7 @@ manifest_add "php/php-config-summary.txt" "collected" "generated"
 step "Scanning session storage for indicators of compromise"
 for d in /var/lib/php/sessions /var/lib/php-sessions /var/lib/php/session \
          /var/lib/php /tmp /var/tmp; do
-    case " $SESSION_SAVE_PATHS " in *" $d "*) ;; *) SESSION_SAVE_PATHS="$SESSION_SAVE_PATHS $d" ;; esac
+    case " $SESSION_SAVE_PATHS " in *" $d "*) ;; *) SESSION_SAVE_PATHS="${SESSION_SAVE_PATHS:+$SESSION_SAVE_PATHS }$d" ;; esac
 done
 logc "session dirs scanned:$SESSION_SAVE_PATHS"
 
@@ -357,6 +358,7 @@ for dir in $SESSION_SAVE_PATHS; do
         [ -r "$f" ] || { logc "session unreadable: $f"; continue; }
         SESS_SCANNED=$((SESS_SCANNED+1))
         chain=""; indicator=""; snippet=""
+        grep -aqF 'upload_progress' "$f" 2>/dev/null || continue
         # Chain A: raw PHP tags written into a session file
         if grep -aqF '<?php' "$f" 2>/dev/null || grep -aqF '<?=' "$f" 2>/dev/null; then
             chain="A"; indicator="php-tag-in-session"
@@ -378,7 +380,7 @@ for dir in $SESSION_SAVE_PATHS; do
             cp -p "$f" "$ROOT/$qdest" 2>/dev/null   # copy only; original untouched
             qh="$(sha256_of "$ROOT/$qdest")"; qm="$(file_mtime "$f")"
             manifest_add "$qdest" "quarantined" "$f"
-            snippet="$(printf '%s' "$snippet" | cut -c1-$SNIPPET_MAX)"
+            snippet="$(printf '%s' "$snippet" | tr -d '\000-\010\013-\037' | cut -c1-$SNIPPET_MAX)"
             printf '%s|%s|%s|%s|%s|%s\n' "$chain" "$indicator" "$f" "$qh" "$qm" "$snippet" >> "$HITS_TMP"
             warn "IOC: session file $f (chain $chain)"
         fi
@@ -458,7 +460,12 @@ snap() {
 [ "$IS_ROOT" -eq 1 ] && snap "iptables.txt"  iptables-save
 [ "$IS_ROOT" -eq 1 ] && snap "nftables.txt"  nft list ruleset
 snap "ufw-status.txt" ufw status verbose
-if have getenforce; then getenforce > "$ROOT/security/selinux-mode.txt" 2>/dev/null; manifest_add "security/selinux-mode.txt" "collected" "getenforce"; fi
+if have getenforce; then
+    getenforce > "$ROOT/security/selinux-mode.txt" 2>/dev/null
+    [ -s "$ROOT/security/selinux-mode.txt" ] \
+      && manifest_add "security/selinux-mode.txt" "collected" "getenforce" \
+      || rm -f "$ROOT/security/selinux-mode.txt"
+fi
 if have ausearch; then
     ausearch -m avc -ts recent > "$ROOT/security/selinux-avc-recent.txt" 2>/dev/null
     [ -s "$ROOT/security/selinux-avc-recent.txt" ] \
@@ -483,29 +490,43 @@ fi
 # pull the known exploitation signatures out of whatever logs we collected
 step "Extracting known exploitation signatures from logs"
 LOG_SIG_HITS=0
-ERRSIG='Failed to decode session object|Failed to read session data'
+ERRSIG='Failed to decode session object'
 scan_logs() {
-    for src in "$ROOT/web"/* "$ROOT/php"/* "$ROOT/php/app"/* "$ROOT/system"/*; do
+    for src in "$ROOT/web"/* "$ROOT/php"/* "$ROOT/php/app"/* "$ROOT/system"/* "$ROOT/security"/*; do
         [ -f "$src" ] || continue
         base="$(basename "$src")"
+        # skip phpinfo config dumps — they naturally contain setting names
+        case "$base" in phpinfo-*) continue ;; esac
+        scanf="$src"
+        case "$src" in
+            *.gz) if   have zcat; then zcat "$src" 2>/dev/null > "$STAGE/scan.tmp"
+                  elif have gzip; then gzip -dc "$src" 2>/dev/null > "$STAGE/scan.tmp"
+                  else : > "$STAGE/scan.tmp"; fi
+                  [ -s "$STAGE/scan.tmp" ] && scanf="$STAGE/scan.tmp" ;;
+        esac
         out="$ROOT/findings/log-hits/${base}.hits.txt"
         : > "$out.tmp"
         # Chain C handler-mismatch error-log line
-        grep -aE "$ERRSIG" "$src" 2>/dev/null >> "$out.tmp"
+        grep -aE "$ERRSIG" "$scanf" 2>/dev/null >> "$out.tmp"
         # upload_progress abuse wherever request bodies get logged (WAF/modsec/debug)
-        grep -aE 'PHP_SESSION_UPLOAD_PROGRESS' "$src" 2>/dev/null >> "$out.tmp"
+        grep -aF 'PHP_SESSION_UPLOAD_PROGRESS' "$scanf" 2>/dev/null \
+          | grep -aE '<\?|O:[0-9]+:' >> "$out.tmp"
         # Chain A LFI: a request that names a session file
-        grep -aiE 'sess_[a-z0-9]{10,}' "$src" 2>/dev/null \
-          | grep -aiE 'GET|POST|\?|/' >> "$out.tmp"
+        grep -aiE 'sess_[a-z0-9]{10,}' "$scanf" 2>/dev/null \
+          | grep -aiE '(GET|POST|HEAD|PUT|DELETE|OPTIONS)[[:space:]]|\.\.(/|%2f)' >> "$out.tmp"
         # injected PHP tags showing up in a logged request
-        grep -aF '<?php' "$src" 2>/dev/null >> "$out.tmp"
+        grep -aF '<?php' "$scanf" 2>/dev/null \
+          | grep -aiE 'upload_progress|sess_[a-z0-9]{10,}' >> "$out.tmp"
+        rm -f "$STAGE/scan.tmp" 2>/dev/null
         if [ -s "$out.tmp" ]; then
             sort -u "$out.tmp" > "$out"; rm -f "$out.tmp"
             n="$(wc -l < "$out" | tr -d ' ')"
             LOG_SIG_HITS=$((LOG_SIG_HITS + n))
             manifest_add "findings/log-hits/${base}.hits.txt" "collected" "$src"
-            firstline="$(head -n1 "$out" | cut -c1-$SNIPPET_MAX)"
-            printf 'LOG|log-signature|%s|%s|%s|%s\n' "$src" "" "" "$firstline" >> "$HITS_TMP"
+            rel="${src#$ROOT/}"
+            realsrc="$(awk -F'|' -v d="$rel" '$1==d{print $6; exit}' "$MANIFEST_TMP")"
+            firstline="$(head -n1 "$out" | tr -d '\000-\010\013-\037' | cut -c1-$SNIPPET_MAX)"
+            printf 'LOG|log-signature|%s|%s|%s|%s\n' "${realsrc:-$src}" "" "" "$firstline" >> "$HITS_TMP"
             warn "IOC: $n log signature line(s) in $base"
         else
             rm -f "$out.tmp"
